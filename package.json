@@ -1,0 +1,23 @@
+{
+  "name": "bitterguard-admin-dashboard",
+  "version": "1.0.0",
+  "description": "Admin dashboard for BitterGuard Mobile app statistics and user management",
+  "type": "module",
+  "scripts": {
+    "dev": "npx http-server . -p 3000 -o",
+    "start": "npx http-server . -p 3000"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "admin",
+    "dashboard",
+    "bitterguard",
+    "supabase"
+  ],
+  "author": "",
+  "license": "MIT"
+}
+

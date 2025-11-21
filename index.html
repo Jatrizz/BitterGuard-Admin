@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitterGuard Admin Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h2>
+                <img src="logo.png" alt="BitterGuard" class="logo-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                <i class="fas fa-leaf" style="display: none;"></i>
+                BitterGuard
+            </h2>
+            <p>Admin Dashboard</p>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="index.html" class="nav-item active">
+                <i class="fas fa-chart-bar"></i> Dashboard
+            </a>
+            <a href="users.html" class="nav-item">
+                <i class="fas fa-users"></i> Users
+            </a>
+            <a href="scans.html" class="nav-item">
+                <i class="fas fa-search"></i> Scans
+            </a>
+            <a href="#" class="nav-item" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Mobile Menu Toggle -->
+    <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle menu">
+        <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="header">
+            <h1>Dashboard Overview</h1>
+            <div class="user-info">
+                <span id="adminName">Admin</span>
+            </div>
+        </header>
+
+        <!-- Filters Section -->
+        <div class="filters" style="margin-bottom: 30px;">
+            <div class="filter-group">
+                <label>Barangay</label>
+                <select id="barangayFilter">
+                    <option value="">All Barangays</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Time Period</label>
+                <select id="timeFilter">
+                    <option value="all">All Time</option>
+                    <option value="year">By Year</option>
+                    <option value="month">By Month</option>
+                </select>
+            </div>
+            <div class="filter-group" id="yearFilterGroup" style="display: none;">
+                <label>Year</label>
+                <select id="yearFilter">
+                    <option value="">Select Year</option>
+                </select>
+            </div>
+            <div class="filter-group" id="monthFilterGroup" style="display: none;">
+                <label>Month</label>
+                <select id="monthFilter">
+                    <option value="">Select Month</option>
+                    <option value="01">January</option>
+                    <option value="02">February</option>
+                    <option value="03">March</option>
+                    <option value="04">April</option>
+                    <option value="05">May</option>
+                    <option value="06">June</option>
+                    <option value="07">July</option>
+                    <option value="08">August</option>
+                    <option value="09">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-secondary" onclick="clearFilters()" title="Clear all filters (Esc)">
+                    <i class="fas fa-times"></i> Clear Filters
+                </button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-success" onclick="generateReport()">
+                    <i class="fas fa-envelope"></i> Generate & Email Report
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-users"></i></div>
+                <div class="stat-info">
+                    <h3>Total Users</h3>
+                    <p class="stat-number" id="totalUsers">0</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-search"></i></div>
+                <div class="stat-info">
+                    <h3>Total Scans</h3>
+                    <p class="stat-number" id="totalScans">0</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-calendar-day"></i></div>
+                <div class="stat-info">
+                    <h3>Scans Today</h3>
+                    <p class="stat-number" id="scansToday">0</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-user-check"></i></div>
+                <div class="stat-info">
+                    <h3>Active Users (30d)</h3>
+                    <p class="stat-number" id="activeUsers">0</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Disease Counts by Category -->
+        <div class="activity-card" style="margin-bottom: 30px;">
+            <h3>Detected Diseases by Category</h3>
+            <div id="diseaseCountsContainer" class="disease-counts-grid">
+                <div class="loading">Loading disease counts...</div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3>Disease Distribution</h3>
+                    <button class="btn btn-secondary" onclick="exportChart('diseaseChart', 'disease-distribution')" style="padding: 6px 12px; font-size: 0.875rem;" title="Download chart as image">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                </div>
+                <canvas id="diseaseChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3>Scans Over Time (Last 7 Days)</h3>
+                    <button class="btn btn-secondary" onclick="exportChart('scansChart', 'scans-over-time')" style="padding: 6px 12px; font-size: 0.875rem;" title="Download chart as image">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                </div>
+                <canvas id="scansChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="activity-card">
+            <h3>Recent Scans</h3>
+            <div class="table-container">
+                <table id="recentScansTable">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Disease</th>
+                            <th>Confidence</th>
+                            <th>Location</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentScansBody">
+                        <tr>
+                            <td colspan="5" class="loading">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script src="supabase.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+

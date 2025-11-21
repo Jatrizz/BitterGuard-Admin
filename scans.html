@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Statistics - BitterGuard Admin</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h2>
+                <img src="logo.png" alt="BitterGuard" class="logo-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                <i class="fas fa-leaf" style="display: none;"></i>
+                BitterGuard
+            </h2>
+            <p>Admin Dashboard</p>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <i class="fas fa-chart-bar"></i> Dashboard
+            </a>
+            <a href="users.html" class="nav-item">
+                <i class="fas fa-users"></i> Users
+            </a>
+            <a href="scans.html" class="nav-item active">
+                <i class="fas fa-search"></i> Scans
+            </a>
+            <a href="#" class="nav-item" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Mobile Menu Toggle -->
+    <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle menu">
+        <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="header">
+            <h1>Scan Statistics</h1>
+            <div class="user-info">
+                <span id="adminName">Admin</span>
+            </div>
+        </header>
+
+        <!-- Filters -->
+        <div class="filters">
+            <div class="filter-group">
+                <label>Disease Type</label>
+                <select id="diseaseFilter">
+                    <option value="">All Diseases</option>
+                    <option value="Downey Mildew">Downey Mildew</option>
+                    <option value="Fusarium Wilt">Fusarium Wilt</option>
+                    <option value="Mosaic Virus">Mosaic Virus</option>
+                    <option value="No Disease Detected">No Disease Detected</option>
+                    <option value="No Bitter Gourd Leaf Detected">No Bitter Gourd Leaf Detected</option>
+                    <option value="Error in Analysis">Error in Analysis</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Date From</label>
+                <input type="date" id="dateFrom">
+            </div>
+            <div class="filter-group">
+                <label>Date To</label>
+                <input type="date" id="dateTo">
+            </div>
+            <div class="filter-group">
+                <label>Location</label>
+                <input type="text" id="locationFilter" placeholder="Filter by location...">
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-primary" onclick="loadScans()">Apply Filters</button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-secondary" onclick="clearScansFilters()" title="Clear all filters (Esc)">
+                    <i class="fas fa-times"></i> Clear Filters
+                </button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-secondary" onclick="exportScans()">Export CSV</button>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid" style="margin-bottom: 30px;">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
+                <div class="stat-info">
+                    <h3>Filtered Scans</h3>
+                    <p class="stat-number" id="filteredCount">0</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-percentage"></i></div>
+                <div class="stat-info">
+                    <h3>Average Confidence</h3>
+                    <p class="stat-number" id="avgConfidence">0%</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scans Table -->
+        <div class="activity-card">
+            <h3>Scan History</h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th id="userColumnHeader" style="display: none;">User</th>
+                            <th>Disease</th>
+                            <th>Confidence</th>
+                            <th>Location</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scansTableBody">
+                        <tr>
+                            <td colspan="6" class="loading">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button class="btn btn-secondary" onclick="loadMoreScans()" id="loadMoreBtn" style="display: none;">Load More</button>
+            </div>
+        </div>
+    </main>
+
+    <script src="supabase.js"></script>
+    <script>
+        // Normalize disease names - groups similar predictions together (same as dashboard)
+        function normalizeDiseaseName(prediction) {
+            if (!prediction) return 'Unknown';
+            
+            const pred = prediction.toLowerCase().trim();
+            
+            // Group "No Leaf Detected" variations
+            if (pred.includes('no bitter gourd leaf') || pred.includes('walang nakitang dahon')) {
+                return 'No Bitter Gourd Leaf Detected';
+            }
+            
+            // Group "No Disease" variations
+            if (pred.includes('no disease') || pred.includes('walang nakitang sakit')) {
+                return 'No Disease Detected';
+            }
+            
+            // Group all error variations together
+            if (pred.includes('error') || 
+                pred.includes('no valid detection') || 
+                pred.includes('invalid detection') ||
+                pred.includes('error in analysis')) {
+                return 'Error in Analysis';
+            }
+            
+            // Group "Downey Mildew" variations (combine low confidence with regular)
+            if (pred.includes('downey mildew') || pred.includes('downy mildew')) {
+                return 'Downey Mildew';
+            }
+            
+            // Group "Fusarium Wilt" variations (combine low confidence with regular)
+            if (pred.includes('fusarium wilt')) {
+                return 'Fusarium Wilt';
+            }
+            
+            // Group "Mosaic Virus" variations (combine low confidence with regular)
+            if (pred.includes('mosaic virus')) {
+                return 'Mosaic Virus';
+            }
+            
+            // Keep other diseases as-is (but remove low confidence suffix if present)
+            let normalized = prediction;
+            if (pred.includes('low confidence')) {
+                normalized = prediction.replace(/\(low confidence\)/gi, '').trim();
+            }
+            return normalized;
+        }
+
+        // Helper function to check if prediction indicates no leaf detected
+        function isNoLeafDetected(prediction) {
+            if (!prediction) return false;
+            const pred = prediction.toLowerCase();
+            return pred.includes('no bitter gourd leaf') ||
+                   pred.includes('walang nakitang dahon') ||
+                   pred.includes('no valid detection') ||
+                   pred.includes('no leaf detected');
+        }
+
+        // Helper function to parse confidence value
+        // Handles both percentage strings (e.g., "74.4%") and decimals (e.g., 0.744)
+        // Returns null if confidence doesn't apply (e.g., no leaf detected)
+        function parseConfidence(confidenceValue, prediction) {
+            // If no leaf detected, confidence doesn't apply
+            if (prediction && isNoLeafDetected(prediction)) {
+                return null;
+            }
+            
+            if (!confidenceValue || confidenceValue === 'EMPTY' || confidenceValue === '') {
+                return null; // Return null instead of 0 to indicate N/A
+            }
+            
+            // If it's a string with %, extract the number
+            if (typeof confidenceValue === 'string' && confidenceValue.includes('%')) {
+                const num = parseFloat(confidenceValue.replace('%', '').trim());
+                return isNaN(num) ? null : num;
+            }
+            
+            // If it's a decimal (0-1 range), convert to percentage
+            const num = parseFloat(confidenceValue);
+            if (isNaN(num)) return null;
+            
+            // If the number is > 1, assume it's already a percentage
+            // If the number is <= 1, assume it's a decimal and multiply by 100
+            return num > 1 ? num : num * 100;
+        }
+
+        let currentPage = 0;
+        const pageSize = 50;
+        let allScans = [];
+        let filteredScans = [];
+
+        // Check for user filter from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const userIdFilter = urlParams.get('user');
+        
+        // Show User column if NOT viewing a specific user's scans
+        if (!userIdFilter) {
+            const userHeader = document.getElementById('userColumnHeader');
+            if (userHeader) {
+                userHeader.style.display = 'table-cell';
+            }
+        }
+        
+        // Store user info to check both id and auth_user_id
+        let userFilterInfo = null;
+
+        // Load scans on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('🚀 Scans page initializing...');
+            console.log('Supabase client available:', !!supabase);
+            
+            // If user filter is provided, get user info to check both id and auth_user_id
+            if (userIdFilter) {
+                try {
+                    const { data: userData, error: userError } = await supabase
+                        .from('users')
+                        .select('id, auth_user_id')
+                        .eq('id', userIdFilter)
+                        .single();
+                    
+                    if (!userError && userData) {
+                        userFilterInfo = {
+                            id: userData.id,
+                            auth_user_id: userData.auth_user_id
+                        };
+                        console.log('✅ User filter info:', userFilterInfo);
+                    } else {
+                        console.warn('⚠️ Could not fetch user info for filter:', userError);
+                    }
+                } catch (err) {
+                    console.error('❌ Error fetching user info:', err);
+                }
+                
+                document.getElementById('diseaseFilter').style.display = 'none';
+                document.getElementById('locationFilter').style.display = 'none';
+                // Hide User column when viewing specific user's scans
+                document.getElementById('userColumnHeader').style.display = 'none';
+            }
+            
+            // Test Supabase connection
+            try {
+                const { data: testData, error: testError } = await supabase
+                    .from('history')
+                    .select('id')
+                    .limit(1);
+                
+                if (testError) {
+                    console.error('❌ Supabase connection test failed:', testError);
+                    console.error('This might be an RLS (Row Level Security) issue.');
+                    console.error('Error code:', testError.code);
+                    console.error('Error message:', testError.message);
+                    console.error('Error hint:', testError.hint);
+                } else {
+                    console.log('✅ Supabase connection test successful');
+                }
+            } catch (err) {
+                console.error('❌ Exception during Supabase connection test:', err);
+            }
+            
+            loadScans();
+            
+            // Setup keyboard shortcuts
+            setupKeyboardShortcuts();
+            
+            // Setup mobile menu
+            setupMobileMenu();
+        });
+        
+        // Setup keyboard shortcuts
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                // Esc key - Clear filters
+                if (e.key === 'Escape' && !e.target.matches('input, textarea, select')) {
+                    e.preventDefault();
+                    if (typeof clearScansFilters === 'function') {
+                        clearScansFilters();
+                    }
+                }
+            });
+        }
+        
+        // Setup mobile menu toggle
+        function setupMobileMenu() {
+            const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+            const sidebar = document.querySelector('.sidebar');
+            
+            if (mobileMenuToggle && sidebar) {
+                mobileMenuToggle.addEventListener('click', () => {
+                    sidebar.classList.toggle('mobile-open');
+                    const icon = mobileMenuToggle.querySelector('i');
+                    if (sidebar.classList.contains('mobile-open')) {
+                        icon.classList.remove('fa-bars');
+                        icon.classList.add('fa-times');
+                    } else {
+                        icon.classList.remove('fa-times');
+                        icon.classList.add('fa-bars');
+                    }
+                });
+
+                // Close menu when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (sidebar.classList.contains('mobile-open') && 
+                        !sidebar.contains(e.target) && 
+                        !mobileMenuToggle.contains(e.target)) {
+                        sidebar.classList.remove('mobile-open');
+                        const icon = mobileMenuToggle.querySelector('i');
+                        icon.classList.remove('fa-times');
+                        icon.classList.add('fa-bars');
+                    }
+                });
+            }
+        }
+
+        // Load scans from database
+        async function loadScans() {
+            const tbody = document.getElementById('scansTableBody');
+            if (!tbody) return;
+
+            // Dynamic colspan based on whether viewing specific user or all scans
+            const colspan = userIdFilter ? 5 : 6;
+            tbody.innerHTML = `<tr><td colspan="${colspan}" class="loading">Loading...</td></tr>`;
+
+            try {
+                // Check if supabase client is available
+                if (!supabase) {
+                    console.error('❌ Supabase client is not initialized!');
+                    tbody.innerHTML = `<tr><td colspan="${colspan}" class="loading">Supabase client not initialized. Please refresh the page.</td></tr>`;
+                    return;
+                }
+
+                // Get filter values (trim whitespace)
+                const diseaseFilter = (document.getElementById('diseaseFilter').value || '').trim();
+                const dateFrom = (document.getElementById('dateFrom').value || '').trim();
+                const dateTo = (document.getElementById('dateTo').value || '').trim();
+                const locationFilter = (document.getElementById('locationFilter').value || '').trim().toLowerCase();
+
+                console.log('🔄 Loading scans with filters:', {
+                    diseaseFilter,
+                    dateFrom,
+                    dateTo,
+                    locationFilter,
+                    userIdFilter
+                });
+
+                // Build query - try without foreign key join first, then fetch users separately
+                let query = supabase
+                    .from('history')
+                    .select('*')
+                    .order('timestamp', { ascending: false })
+                    .limit(1000); // Get up to 1000 records
+
+                // Apply user filter if from URL - try both id and auth_user_id
+                if (userIdFilter) {
+                    if (userFilterInfo) {
+                        // Try matching by both id and auth_user_id using 'or' filter
+                        query = query.or(`user_id.eq.${userFilterInfo.id},user_id.eq.${userFilterInfo.auth_user_id}`);
+                    } else {
+                        // Fallback to just the provided userIdFilter
+                        query = query.eq('user_id', userIdFilter);
+                    }
+                }
+
+                // Note: Disease and location filters will be applied in JavaScript after normalization
+                // This ensures consistent matching with normalized disease names
+                // Date filters are applied in the query above
+
+                // Apply date filters
+                if (dateFrom && dateFrom.trim()) {
+                    try {
+                        const fromDate = new Date(dateFrom);
+                        if (!isNaN(fromDate.getTime())) {
+                            fromDate.setHours(0, 0, 0, 0);
+                            const fromTimestamp = fromDate.getTime().toString();
+                            console.log('📅 Date From filter:', dateFrom, '-> timestamp:', fromTimestamp);
+                            query = query.gte('timestamp', fromTimestamp);
+                        } else {
+                            console.warn('⚠️ Invalid dateFrom value:', dateFrom);
+                        }
+                    } catch (e) {
+                        console.error('❌ Error parsing dateFrom:', e);
+                    }
+                }
+                if (dateTo && dateTo.trim()) {
+                    try {
+                        const toDate = new Date(dateTo);
+                        if (!isNaN(toDate.getTime())) {
+                            toDate.setHours(23, 59, 59, 999);
+                            const toTimestamp = toDate.getTime().toString();
+                            console.log('📅 Date To filter:', dateTo, '-> timestamp:', toTimestamp);
+                            query = query.lte('timestamp', toTimestamp);
+                        } else {
+                            console.warn('⚠️ Invalid dateTo value:', dateTo);
+                        }
+                    } catch (e) {
+                        console.error('❌ Error parsing dateTo:', e);
+                    }
+                }
+
+                const { data: scans, error } = await query;
+
+                if (error) {
+                    console.error('❌ Error loading scans:', error);
+                    console.error('Error details:', {
+                        code: error.code,
+                        message: error.message,
+                        details: error.details,
+                        hint: error.hint
+                    });
+                    throw error;
+                }
+
+                console.log('✅ Scans data received:', scans ? `${scans.length} records` : 'null');
+
+                // Fetch user data separately
+                // Need to check both id and auth_user_id since history.user_id might reference either
+                const userIds = [...new Set((scans || []).map(scan => scan.user_id).filter(Boolean))];
+                let usersMap = {};
+                
+                if (userIds.length > 0) {
+                    console.log('🔄 Fetching user data for', userIds.length, 'users...');
+                    
+                    // Try to fetch users by id first
+                    const { data: usersById, error: usersByIdError } = await supabase
+                        .from('users')
+                        .select('id, auth_user_id, email, phone, name')
+                        .in('id', userIds);
+                    
+                    // Also try to fetch users by auth_user_id
+                    const { data: usersByAuthId, error: usersByAuthIdError } = await supabase
+                        .from('users')
+                        .select('id, auth_user_id, email, phone, name')
+                        .in('auth_user_id', userIds);
+                    
+                    // Combine results
+                    const allUsers = [];
+                    if (usersById && !usersByIdError) {
+                        allUsers.push(...usersById);
+                    }
+                    if (usersByAuthId && !usersByAuthIdError) {
+                        // Avoid duplicates
+                        usersByAuthId.forEach(user => {
+                            if (!allUsers.find(u => u.id === user.id)) {
+                                allUsers.push(user);
+                            }
+                        });
+                    }
+                    
+                    if (usersByIdError || usersByAuthIdError) {
+                        console.error('❌ Error fetching users:', usersByIdError || usersByAuthIdError);
+                    } else {
+                        console.log('✅ User data received:', allUsers ? `${allUsers.length} users` : 'null');
+                        if (allUsers) {
+                            allUsers.forEach(user => {
+                                // Map by both id and auth_user_id so we can find users either way
+                                usersMap[user.id] = user;
+                                if (user.auth_user_id) {
+                                    usersMap[user.auth_user_id] = user;
+                                }
+                            });
+                        }
+                    }
+                }
+
+                // Apply location and disease filters in JavaScript (for better normalization)
+                console.log('🔍 Applying filters to', scans?.length || 0, 'scans');
+                console.log('📋 Filter values:', { diseaseFilter, locationFilter, dateFrom, dateTo });
+                
+                filteredScans = (scans || []).map(scan => ({
+                    ...scan,
+                    users: usersMap[scan.user_id] || {},
+                    normalizedPrediction: normalizeDiseaseName(scan.prediction)
+                })).filter(scan => {
+                    // Apply location filter (case-insensitive partial match)
+                    if (locationFilter && locationFilter.trim()) {
+                        const location = (scan.location || '').toLowerCase().trim();
+                        const filterLocation = locationFilter.toLowerCase().trim();
+                        if (!location.includes(filterLocation)) {
+                            console.log(`❌ Location filter: "${scan.location}" does not contain "${locationFilter}"`);
+                            return false;
+                        }
+                    }
+                    
+                    // Apply disease filter with normalization (exact match on normalized name)
+                    if (diseaseFilter && diseaseFilter.trim()) {
+                        const normalized = scan.normalizedPrediction || normalizeDiseaseName(scan.prediction);
+                        const filterValue = diseaseFilter.trim();
+                        
+                        // Exact match (case-insensitive)
+                        if (normalized.toLowerCase() !== filterValue.toLowerCase()) {
+                            console.log(`❌ Disease filter: "${normalized}" does not match "${filterValue}"`);
+                            return false;
+                        }
+                    }
+                    
+                    return true;
+                });
+                
+                console.log(`✅ Filtered scans: ${filteredScans.length} out of ${scans?.length || 0} total scans`);
+                
+                console.log('✅ Filtered scans result:', filteredScans.length, 'scans');
+
+                console.log('✅ Filtered scans:', filteredScans.length);
+
+                // Update stats
+                updateStats();
+
+                // Reset pagination
+                currentPage = 0;
+                displayScans();
+            } catch (error) {
+                console.error('❌ Error loading scans:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    code: error.code,
+                    details: error.details,
+                    hint: error.hint,
+                    stack: error.stack
+                });
+                const errorMessage = error.message || 'Unknown error';
+                const isRLSError = error.code === 'PGRST301' || error.message?.includes('RLS') || error.message?.includes('permission');
+                const colspan = userIdFilter ? 5 : 6;
+                
+                let userFriendlyMessage = '';
+                if (isRLSError) {
+                    userFriendlyMessage = '⚠️ Access Restricted<br><br>Your account doesn\'t have permission to view scan data. Please contact your administrator.';
+                } else if (error.code === '42P17' || errorMessage.includes('infinite recursion')) {
+                    userFriendlyMessage = '⚠️ Database Configuration Error<br><br>There\'s a configuration issue with the database. Please contact your administrator.';
+                } else {
+                    userFriendlyMessage = '⚠️ Unable to Load Scans<br><br>We couldn\'t load the scan data. Please try refreshing the page or contact support if the problem continues.';
+                }
+                
+                tbody.innerHTML = `<tr><td colspan="${colspan}" class="loading" style="text-align: center; padding: 2rem; color: var(--danger);">${userFriendlyMessage}</td></tr>`;
+            }
+        }
+
+        // Update statistics
+        function updateStats() {
+            document.getElementById('filteredCount').textContent = filteredScans.length.toLocaleString();
+
+            // Calculate average confidence (only for scans with valid confidence)
+            if (filteredScans.length > 0) {
+                const confidences = filteredScans
+                    .map(scan => parseConfidence(scan.confidence, scan.prediction))
+                    .filter(conf => conf !== null && conf !== undefined);
+                
+                if (confidences.length > 0) {
+                    const totalConfidence = confidences.reduce((sum, conf) => sum + conf, 0);
+                    const avgConf = totalConfidence / confidences.length;
+                    document.getElementById('avgConfidence').textContent = avgConf.toFixed(1) + '%';
+                } else {
+                    document.getElementById('avgConfidence').textContent = 'N/A';
+                }
+            } else {
+                document.getElementById('avgConfidence').textContent = '0%';
+            }
+        }
+
+        // Display scans with pagination
+        function displayScans() {
+            const tbody = document.getElementById('scansTableBody');
+            if (!tbody) return;
+
+            const startIndex = currentPage * pageSize;
+            const endIndex = startIndex + pageSize;
+            const scansToShow = filteredScans.slice(startIndex, endIndex);
+
+            if (scansToShow.length === 0) {
+                const colspan = userIdFilter ? 5 : 6; // 5 columns if viewing specific user, 6 if viewing all
+                tbody.innerHTML = `<tr><td colspan="${colspan}" class="loading">No scans found</td></tr>`;
+                document.getElementById('loadMoreBtn').style.display = 'none';
+                return;
+            }
+
+            // Use formatDate from supabaseUtils or define fallback
+            const formatDateFunc = window.supabaseUtils?.formatDate || function(timestamp) {
+                if (!timestamp) return 'N/A';
+                const date = new Date(parseInt(timestamp));
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            };
+            const showUserColumn = !userIdFilter; // Show user column only when not viewing specific user
+            
+            tbody.innerHTML = scansToShow.map(scan => {
+                const user = scan.users || {};
+                const userName = user.name || user.display_name || user.email || user.phone || scan.user_id?.substring(0, 8) || 'Unknown';
+                const confidencePercent = parseConfidence(scan.confidence, scan.prediction);
+                
+                // Display confidence or blank
+                let confidenceDisplay = '—';
+                let confidenceColor = '#999';
+                
+                if (confidencePercent !== null && confidencePercent !== undefined) {
+                    confidenceDisplay = confidencePercent.toFixed(1) + '%';
+                    // For color coding, use percentage value (0-100) divided by 100
+                    const confidenceDecimal = confidencePercent / 100;
+                    confidenceColor = confidenceDecimal >= 0.7 ? '#4CAF50' : confidenceDecimal >= 0.5 ? '#FF9800' : '#F44336';
+                }
+
+                const userCell = showUserColumn ? `<td>${userName}</td>` : '';
+                
+                return `
+                    <tr>
+                        <td>${(scan.id || '').substring(0, 8)}...</td>
+                        ${userCell}
+                        <td>${scan.prediction || 'Unknown'}</td>
+                        <td style="color: ${confidenceColor}; font-weight: 600;">${confidenceDisplay}</td>
+                        <td>${scan.location || 'N/A'}</td>
+                        <td>${formatDateFunc(scan.timestamp)}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            // Show/hide load more button
+            if (endIndex < filteredScans.length) {
+                document.getElementById('loadMoreBtn').style.display = 'block';
+            } else {
+                document.getElementById('loadMoreBtn').style.display = 'none';
+            }
+        }
+
+        // Load more scans
+        function loadMoreScans() {
+            currentPage++;
+            const startIndex = currentPage * pageSize;
+            const endIndex = startIndex + pageSize;
+            const scansToShow = filteredScans.slice(startIndex, endIndex);
+
+            const tbody = document.getElementById('scansTableBody');
+            // Use formatDate from supabaseUtils or define fallback
+            const formatDateFunc = window.supabaseUtils?.formatDate || function(timestamp) {
+                if (!timestamp) return 'N/A';
+                const date = new Date(parseInt(timestamp));
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            };
+            const showUserColumn = !userIdFilter; // Show user column only when not viewing specific user
+            
+            scansToShow.forEach(scan => {
+                const user = scan.users || {};
+                const userName = user.name || user.display_name || user.email || user.phone || scan.user_id?.substring(0, 8) || 'Unknown';
+                const confidencePercent = parseConfidence(scan.confidence, scan.prediction);
+                
+                // Display confidence or blank
+                let confidenceDisplay = '—';
+                let confidenceColor = '#999';
+                
+                if (confidencePercent !== null && confidencePercent !== undefined) {
+                    confidenceDisplay = confidencePercent.toFixed(1) + '%';
+                    // For color coding, use percentage value (0-100) divided by 100
+                    const confidenceDecimal = confidencePercent / 100;
+                    confidenceColor = confidenceDecimal >= 0.7 ? '#4CAF50' : confidenceDecimal >= 0.5 ? '#FF9800' : '#F44336';
+                }
+
+                const userCell = showUserColumn ? `<td>${userName}</td>` : '';
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${(scan.id || '').substring(0, 8)}...</td>
+                    ${userCell}
+                    <td>${scan.prediction || 'Unknown'}</td>
+                    <td style="color: ${confidenceColor}; font-weight: 600;">${confidenceDisplay}</td>
+                    <td>${scan.location || 'N/A'}</td>
+                    <td>${formatDateFunc(scan.timestamp)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            if (endIndex >= filteredScans.length) {
+                document.getElementById('loadMoreBtn').style.display = 'none';
+            }
+        }
+
+        // Export scans to CSV
+        function exportScans() {
+            if (filteredScans.length === 0) {
+                alert('No scans to export');
+                return;
+            }
+
+            // CSV header - include User column only if not viewing specific user
+            const showUserColumn = !userIdFilter;
+            let csv = showUserColumn ? 'ID,User,Disease,Confidence,Location,Date\n' : 'ID,Disease,Confidence,Location,Date\n';
+
+            // CSV rows
+            // Use formatDate from supabaseUtils or define fallback
+            const formatDateFunc = window.supabaseUtils?.formatDate || function(timestamp) {
+                if (!timestamp) return 'N/A';
+                const date = new Date(parseInt(timestamp));
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            };
+            filteredScans.forEach(scan => {
+                const user = scan.users || {};
+                const userName = user.name || user.display_name || user.email || user.phone || scan.user_id?.substring(0, 8) || 'Unknown';
+                const confidencePercent = parseConfidence(scan.confidence, scan.prediction);
+                const confidenceDisplay = confidencePercent !== null && confidencePercent !== undefined 
+                    ? confidencePercent.toFixed(1) + '%' 
+                    : 'N/A';
+                const date = formatDateFunc(scan.timestamp);
+
+                if (showUserColumn) {
+                    csv += `"${scan.id || ''}","${userName}","${scan.prediction || 'Unknown'}","${confidenceDisplay}","${scan.location || 'N/A'}","${date}"\n`;
+                } else {
+                    csv += `"${scan.id || ''}","${scan.prediction || 'Unknown'}","${confidenceDisplay}","${scan.location || 'N/A'}","${date}"\n`;
+                }
+            });
+
+            // Download CSV
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `bitterguard-scans-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Clear all filters
+        function clearScansFilters() {
+            try {
+                document.getElementById('diseaseFilter').value = '';
+                document.getElementById('dateFrom').value = '';
+                document.getElementById('dateTo').value = '';
+                document.getElementById('locationFilter').value = '';
+                
+                // Reload scans without filters
+                loadScans();
+                
+                console.log('✅ Filters cleared');
+            } catch (error) {
+                console.error('❌ Error clearing filters:', error);
+                alert('Unable to clear filters. Please try again.');
+            }
+        }
+
+        // Make function globally accessible
+        window.clearScansFilters = clearScansFilters;
+    </script>
+</body>
+</html>
+

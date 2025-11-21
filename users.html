@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - BitterGuard Admin</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h2>
+                <img src="logo.png" alt="BitterGuard" class="logo-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                <i class="fas fa-leaf" style="display: none;"></i>
+                BitterGuard
+            </h2>
+            <p>Admin Dashboard</p>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <i class="fas fa-chart-bar"></i> Dashboard
+            </a>
+            <a href="users.html" class="nav-item active">
+                <i class="fas fa-users"></i> Users
+            </a>
+            <a href="scans.html" class="nav-item">
+                <i class="fas fa-search"></i> Scans
+            </a>
+            <a href="#" class="nav-item" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="header">
+            <h1>User Management</h1>
+            <div class="user-info">
+                <span id="adminName">Admin</span>
+            </div>
+        </header>
+
+        <!-- Filters -->
+        <div class="filters">
+            <div class="filter-group">
+                <label>Search</label>
+                <input type="text" id="searchInput" placeholder="Search by name, email, or phone...">
+            </div>
+            <div class="filter-group">
+                <label>Role</label>
+                <select id="roleFilter">
+                    <option value="">All Roles</option>
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Sort By</label>
+                <select id="sortBy">
+                    <option value="created_at">Registration Date</option>
+                    <option value="name">Name</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-primary" onclick="loadUsers()">Refresh</button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="btn btn-secondary" onclick="clearUsersFilters()" title="Clear all filters (Esc)">
+                    <i class="fas fa-times"></i> Clear Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Users Table -->
+        <div class="activity-card">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Role</th>
+                            <th>Registration Date</th>
+                            <th>Total Scans</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody">
+                        <tr>
+                            <td colspan="8" class="loading">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <p id="userCount">Total Users: 0</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="supabase.js"></script>
+    <script>
+        // Load users on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('🚀 Users page initializing...');
+            console.log('Supabase client available:', !!supabase);
+            
+            // Test Supabase connection
+            try {
+                const { data: testData, error: testError } = await supabase
+                    .from('users')
+                    .select('id')
+                    .limit(1);
+                
+                if (testError) {
+                    console.error('❌ Supabase connection test failed:', testError);
+                    console.error('This might be an RLS (Row Level Security) issue.');
+                    console.error('Error code:', testError.code);
+                    console.error('Error message:', testError.message);
+                    console.error('Error hint:', testError.hint);
+                } else {
+                    console.log('✅ Supabase connection test successful');
+                }
+            } catch (err) {
+                console.error('❌ Exception during Supabase connection test:', err);
+            }
+            
+            loadUsers();
+            setupFilters();
+            
+            // Setup keyboard shortcuts
+            setupKeyboardShortcuts();
+            
+            // Setup mobile menu
+            setupMobileMenu();
+        });
+        
+        // Setup mobile menu toggle
+        function setupMobileMenu() {
+            const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+            const sidebar = document.querySelector('.sidebar');
+            
+            if (mobileMenuToggle && sidebar) {
+                mobileMenuToggle.addEventListener('click', () => {
+                    sidebar.classList.toggle('mobile-open');
+                    const icon = mobileMenuToggle.querySelector('i');
+                    if (sidebar.classList.contains('mobile-open')) {
+                        icon.classList.remove('fa-bars');
+                        icon.classList.add('fa-times');
+                    } else {
+                        icon.classList.remove('fa-times');
+                        icon.classList.add('fa-bars');
+                    }
+                });
+
+                // Close menu when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (sidebar.classList.contains('mobile-open') && 
+                        !sidebar.contains(e.target) && 
+                        !mobileMenuToggle.contains(e.target)) {
+                        sidebar.classList.remove('mobile-open');
+                        const icon = mobileMenuToggle.querySelector('i');
+                        icon.classList.remove('fa-times');
+                        icon.classList.add('fa-bars');
+                    }
+                });
+            }
+        }
+        
+        // Setup keyboard shortcuts
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                // Esc key - Clear filters
+                if (e.key === 'Escape' && !e.target.matches('input, textarea, select')) {
+                    e.preventDefault();
+                    if (typeof clearUsersFilters === 'function') {
+                        clearUsersFilters();
+                    }
+                }
+                
+                // Ctrl+F or Cmd+F - Focus search
+                if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput && document.activeElement !== searchInput) {
+                        e.preventDefault();
+                        searchInput.focus();
+                        searchInput.select();
+                    }
+                }
+            });
+        }
+
+        // Setup filter handlers
+        function setupFilters() {
+            document.getElementById('searchInput').addEventListener('input', debounce(loadUsers, 300));
+            document.getElementById('roleFilter').addEventListener('change', loadUsers);
+            document.getElementById('sortBy').addEventListener('change', loadUsers);
+        }
+
+        // Debounce function
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Load users from database
+        async function loadUsers() {
+            const tbody = document.getElementById('usersTableBody');
+            if (!tbody) return;
+
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading...</td></tr>';
+
+            try {
+                // Check if supabase is available
+                if (!supabase) {
+                    console.error('❌ Supabase client is not initialized!');
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading">Supabase client not initialized. Please refresh the page.</td></tr>';
+                    return;
+                }
+
+                // Get filter values
+                const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+                const roleFilter = document.getElementById('roleFilter').value;
+                const sortBy = document.getElementById('sortBy').value;
+
+                console.log('🔄 Loading users with filters:', { searchTerm, roleFilter, sortBy });
+
+                // Check session first
+                const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+                if (sessionError || !session) {
+                    console.error('❌ No valid session:', sessionError);
+                    throw new Error('Not authenticated. Please log in again.');
+                }
+                
+                console.log('✅ Session active for user:', session.user.email);
+                console.log('✅ User ID:', session.user.id);
+
+                // Build query with explicit error handling
+                // Note: We'll fetch all users first, then filter and sort in JavaScript
+                // This ensures we can handle case-insensitive matching and see all data
+                // We don't sort in the database query to avoid errors with missing columns
+                let query = supabase
+                    .from('users')
+                    .select('*');
+                
+                // Don't apply .order() here - we'll sort in JavaScript after fetching
+                // This avoids errors if columns don't exist
+
+                console.log('📤 Executing query...');
+                const { data: users, error } = await query;
+                
+                // If error is RLS-related, provide helpful message
+                if (error && (error.code === 'PGRST301' || error.message?.includes('RLS') || error.message?.includes('permission'))) {
+                    console.error('🔒 RLS (Row Level Security) Error Detected!');
+                    console.error('This means your Supabase table has RLS enabled but no policy allows this query.');
+                    console.error('You need to create RLS policies in your Supabase dashboard.');
+                    console.error('See console for SQL policy examples.');
+                    
+                    // Log SQL policy examples
+                    console.log(`
+╔════════════════════════════════════════════════════════════════╗
+║  RLS POLICY SQL - Copy and run in Supabase SQL Editor         ║
+╚════════════════════════════════════════════════════════════════╝
+
+-- Allow authenticated admins to read all users
+CREATE POLICY "Allow admins to read users"
+ON users
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM users
+        WHERE users.auth_user_id = auth.uid()
+        AND users.is_super_admin = true
+    )
+);
+
+-- Or, if you want to allow all authenticated users to read users:
+CREATE POLICY "Allow authenticated users to read users"
+ON users
+FOR SELECT
+TO authenticated
+USING (true);
+
+-- To check if RLS is enabled:
+SELECT tablename, rowsecurity 
+FROM pg_tables 
+WHERE schemaname = 'public' AND tablename = 'users';
+
+-- To disable RLS (NOT RECOMMENDED for production):
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+                    `);
+                }
+
+                if (error) {
+                    console.error('❌ Error loading users:', error);
+                    console.error('Error details:', {
+                        code: error.code,
+                        message: error.message,
+                        details: error.details,
+                        hint: error.hint
+                    });
+                    throw error;
+                }
+
+                console.log('✅ Users data received:', users ? `${users.length} users` : 'null');
+                
+                // Debug: Log unique roles found in database
+                if (users && users.length > 0) {
+                    const uniqueRoles = [...new Set(users.map(u => u.role).filter(Boolean))];
+                    console.log('📊 Unique roles found in database:', uniqueRoles);
+                    console.log('📊 Role filter value:', roleFilter);
+                }
+
+                // Get scan counts for each user
+                const usersWithScans = await Promise.all(
+                    (users || []).map(async (user) => {
+                        // Try both user.id and user.auth_user_id to match history.user_id
+                        // The history table's user_id might reference either field
+                        const userId = user.id;
+                        const authUserId = user.auth_user_id;
+                        
+                        let scanCount = 0;
+                        
+                        // Try matching by users.id first
+                        if (userId) {
+                            const { count, error } = await supabase
+                                .from('history')
+                                .select('*', { count: 'exact', head: true })
+                                .eq('user_id', userId);
+                            
+                            if (!error && count) {
+                                scanCount = count;
+                            } else if (error) {
+                                console.warn(`Error getting scan count for user.id ${userId}:`, error);
+                            }
+                        }
+                        
+                        // If no results, try matching by auth_user_id
+                        if (scanCount === 0 && authUserId) {
+                            const { count, error } = await supabase
+                                .from('history')
+                                .select('*', { count: 'exact', head: true })
+                                .eq('user_id', authUserId);
+                            
+                            if (!error && count) {
+                                scanCount = count;
+                            } else if (error) {
+                                console.warn(`Error getting scan count for auth_user_id ${authUserId}:`, error);
+                            }
+                        }
+
+                        return {
+                            ...user,
+                            scanCount: scanCount
+                        };
+                    })
+                );
+
+                // Apply role filter based on is_super_admin
+                let filteredUsers = usersWithScans;
+                if (roleFilter) {
+                    if (roleFilter === 'admin') {
+                        // Show only users with is_super_admin = TRUE
+                        filteredUsers = filteredUsers.filter(user => {
+                            const isSuperAdmin = user.is_super_admin === true || 
+                                                user.is_super_admin === 'true' || 
+                                                user.is_super_admin === 1 ||
+                                                String(user.is_super_admin).toLowerCase() === 'true';
+                            return isSuperAdmin;
+                        });
+                        console.log(`🔍 Filtered by role "admin" (is_super_admin = TRUE): ${filteredUsers.length} users`);
+                    } else if (roleFilter === 'user') {
+                        // Show all users EXCEPT admins (is_super_admin != TRUE)
+                        filteredUsers = filteredUsers.filter(user => {
+                            const isSuperAdmin = user.is_super_admin === true || 
+                                                user.is_super_admin === 'true' || 
+                                                user.is_super_admin === 1 ||
+                                                String(user.is_super_admin).toLowerCase() === 'true';
+                            return !isSuperAdmin; // Exclude admins
+                        });
+                        console.log(`🔍 Filtered by role "user" (excluding admins): ${filteredUsers.length} users`);
+                    }
+                }
+
+                // Apply search filter
+                if (searchTerm) {
+                    filteredUsers = filteredUsers.filter(user => {
+                        const name = (user.name || user.display_name || '').toLowerCase();
+                        const email = (user.email || '').toLowerCase();
+                        const phone = (user.phone || '').toLowerCase();
+                        return name.includes(searchTerm) || email.includes(searchTerm) || phone.includes(searchTerm);
+                    });
+                    console.log(`🔍 Filtered by search "${searchTerm}": ${filteredUsers.length} users`);
+                }
+
+                // Apply sorting
+                if (sortBy === 'name') {
+                    // Sort alphabetically by name (display name, fallback to email)
+                    filteredUsers.sort((a, b) => {
+                        const nameA = (a.name || a.display_name || a.email || a.phone || '').toLowerCase();
+                        const nameB = (b.name || b.display_name || b.email || b.phone || '').toLowerCase();
+                        return nameA.localeCompare(nameB);
+                    });
+                    console.log('🔍 Sorted alphabetically by name');
+                } else if (sortBy === 'created_at') {
+                    // Sort by registration date (newest first)
+                    filteredUsers.sort((a, b) => {
+                        const dateA = new Date(a.created_at || 0);
+                        const dateB = new Date(b.created_at || 0);
+                        return dateB - dateA; // Descending (newest first)
+                    });
+                    console.log('🔍 Sorted by registration date (newest first)');
+                }
+
+                // Update count
+                document.getElementById('userCount').textContent = `Total Users: ${filteredUsers.length}`;
+
+                if (filteredUsers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="loading">No users found</td></tr>';
+                    return;
+                }
+
+                // Render table
+                tbody.innerHTML = filteredUsers.map(user => {
+                    const userId = user.id || user.auth_user_id || 'N/A';
+                    const createdDate = user.created_at 
+                        ? new Date(user.created_at).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                        })
+                        : 'N/A';
+
+                    // Use display name (name field), fallback to email or phone if name doesn't exist
+                    const displayName = user.name || user.display_name || user.email || user.phone || 'N/A';
+                    
+                    return `
+                        <tr>
+                            <td>${userId.substring(0, 8)}...</td>
+                            <td>${displayName}</td>
+                            <td>${user.email || 'N/A'}</td>
+                            <td>${user.phone || 'N/A'}</td>
+                            <td><span style="padding: 4px 8px; background: ${user.role === 'admin' ? '#4CAF50' : '#e0e0e0'}; border-radius: 4px; font-size: 0.875rem;">${user.role || 'user'}</span></td>
+                            <td>${createdDate}</td>
+                            <td>${user.scanCount || 0}</td>
+                            <td>
+                                <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.875rem;" onclick="viewUserDetails('${userId}')">View</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('❌ Error loading users:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    code: error.code,
+                    details: error.details,
+                    hint: error.hint,
+                    stack: error.stack
+                });
+                
+                const errorMessage = error.message || 'Unknown error';
+                const errorHint = error.hint ? ` (${error.hint})` : '';
+                const errorCode = error.code ? ` [${error.code}]` : '';
+                
+                // Check if it's an RLS error
+                const isRLSError = error.code === 'PGRST301' || 
+                                  error.message?.includes('RLS') || 
+                                  error.message?.includes('permission') ||
+                                  error.message?.includes('denied') ||
+                                  error.message?.includes('policy');
+                
+                if (isRLSError) {
+                    console.error('🔒 RLS (Row Level Security) Error Detected!');
+                    console.error('This means your Supabase table has RLS enabled but no policy allows this query.');
+                    console.log(`
+╔════════════════════════════════════════════════════════════════╗
+║  RLS POLICY SQL - Copy and run in Supabase SQL Editor         ║
+╚════════════════════════════════════════════════════════════════╝
+
+-- Option 1: Allow authenticated admins to read all users
+CREATE POLICY "Allow admins to read users"
+ON users
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.auth_user_id = auth.uid()
+        AND (u.is_super_admin = true OR u.role = 'admin')
+    )
+);
+
+-- Option 2: Allow all authenticated users to read users (less secure)
+CREATE POLICY "Allow authenticated users to read users"
+ON users
+FOR SELECT
+TO authenticated
+USING (true);
+
+-- To check if RLS is enabled:
+SELECT tablename, rowsecurity 
+FROM pg_tables 
+WHERE schemaname = 'public' AND tablename = 'users';
+
+-- To temporarily disable RLS for testing (NOT RECOMMENDED):
+-- ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+                    `);
+                }
+                
+                let errorDisplay = '';
+                if (isRLSError) {
+                    errorDisplay = '<strong style="color: #c53030;">⚠️ Access Restricted</strong><br><br>';
+                    errorDisplay += 'Your account doesn\'t have permission to view user data.<br>';
+                    errorDisplay += 'This is a security policy issue. Please contact your administrator to grant access.<br><br>';
+                    errorDisplay += '<small style="color: #718096;">Technical details are available in the browser console (Press F12).</small>';
+                } else if (errorCode === '42P17' || errorMessage?.includes('infinite recursion')) {
+                    errorDisplay = '<strong style="color: #c53030;">⚠️ Database Configuration Error</strong><br><br>';
+                    errorDisplay += 'There\'s a configuration issue with the database security policies.<br>';
+                    errorDisplay += 'Please contact your administrator to fix this issue.<br><br>';
+                    errorDisplay += '<small style="color: #718096;">Error code: ' + errorCode + '</small>';
+                } else {
+                    errorDisplay = '<strong style="color: #c53030;">⚠️ Unable to Load Users</strong><br><br>';
+                    errorDisplay += 'We couldn\'t load the user list. This might be a temporary issue.<br>';
+                    errorDisplay += 'Please try refreshing the page or contact support if the problem continues.<br><br>';
+                    errorDisplay += '<small style="color: #718096;">Error: ' + (errorMessage || 'Unknown error') + '</small>';
+                }
+                
+                tbody.innerHTML = `<tr><td colspan="8" class="loading" style="text-align: center; padding: 2rem;">${errorDisplay}</td></tr>`;
+                
+                // Update count to show error state
+                const userCountEl = document.getElementById('userCount');
+                if (userCountEl) {
+                    userCountEl.textContent = 'Total Users: Error';
+                }
+            }
+        }
+
+        // View user details
+        function viewUserDetails(userId) {
+            // Navigate to scans page filtered by user
+            window.location.href = `scans.html?user=${userId}`;
+        }
+
+        // Diagnostic function - can be called from console
+        window.testUsersConnection = async function() {
+            console.log('🧪 Testing Users Table Connection...');
+            console.log('=====================================');
+            
+            try {
+                // Test 1: Check Supabase client
+                console.log('1️⃣ Checking Supabase client...');
+                if (!supabase) {
+                    console.error('❌ Supabase client is not available!');
+                    return { error: 'Supabase client not initialized' };
+                }
+                console.log('✅ Supabase client is available');
+                
+                // Test 2: Check session
+                console.log('2️⃣ Checking authentication session...');
+                const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+                if (sessionError || !session) {
+                    console.error('❌ No valid session:', sessionError);
+                    return { error: 'Not authenticated', sessionError };
+                }
+                console.log('✅ Session active:', session.user.email);
+                
+                // Test 3: Try simple query
+                console.log('3️⃣ Testing simple query (select id only)...');
+                const { data: simpleData, error: simpleError } = await supabase
+                    .from('users')
+                    .select('id')
+                    .limit(1);
+                
+                if (simpleError) {
+                    console.error('❌ Simple query failed:', simpleError);
+                    console.error('Error code:', simpleError.code);
+                    console.error('Error message:', simpleError.message);
+                    
+                    if (simpleError.code === 'PGRST301' || simpleError.message?.includes('RLS')) {
+                        console.error('🔒 This is an RLS (Row Level Security) error!');
+                        console.log('See the error message above for SQL policy examples.');
+                    }
+                    return { error: simpleError, isRLSError: true };
+                }
+                console.log('✅ Simple query successful:', simpleData);
+                
+                // Test 4: Try full query
+                console.log('4️⃣ Testing full query (select all)...');
+                const { data: fullData, error: fullError } = await supabase
+                    .from('users')
+                    .select('*')
+                    .limit(5);
+                
+                if (fullError) {
+                    console.error('❌ Full query failed:', fullError);
+                    return { error: fullError };
+                }
+                console.log('✅ Full query successful:', fullData?.length || 0, 'users');
+                
+                return {
+                    success: true,
+                    session: { email: session.user.email, id: session.user.id },
+                    simpleQuery: simpleData,
+                    fullQuery: fullData,
+                    userCount: fullData?.length || 0
+                };
+            } catch (err) {
+                console.error('❌ Test failed with exception:', err);
+                return { error: err };
+            }
+        };
+        
+        console.log('💡 Tip: Run testUsersConnection() in the console to diagnose connection issues');
+
+        // Clear all filters
+        function clearUsersFilters() {
+            try {
+                document.getElementById('searchInput').value = '';
+                document.getElementById('roleFilter').value = '';
+                document.getElementById('sortBy').value = 'created_at';
+                
+                // Reload users without filters
+                loadUsers();
+                
+                console.log('✅ Filters cleared');
+            } catch (error) {
+                console.error('❌ Error clearing filters:', error);
+                alert('Unable to clear filters. Please try again.');
+            }
+        }
+
+        // Make function globally accessible
+        window.clearUsersFilters = clearUsersFilters;
+    </script>
+</body>
+</html>
+

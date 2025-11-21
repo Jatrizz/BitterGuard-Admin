@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitterGuard Admin - Login</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <h1>
+                    <img src="logo.png" alt="BitterGuard" class="logo-icon-large" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                    <i class="fas fa-leaf" style="display: none;"></i>
+                    BitterGuard
+                </h1>
+                <p>Admin Dashboard</p>
+            </div>
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required placeholder="admin@bitterguard.com">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="password" name="password" required placeholder="Enter your password">
+                        <button type="button" class="password-toggle" id="passwordToggle" aria-label="Toggle password visibility">
+                            <i class="fas fa-eye" id="passwordToggleIcon"></i>
+                        </button>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Login</button>
+                <div id="errorMessage" class="error-message"></div>
+            </form>
+            <div class="login-footer">
+                <p>Authorized personnel only</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="supabase.js"></script>
+    <script>
+        // Check if already logged in
+        window.addEventListener('DOMContentLoaded', async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                // Check if user is admin
+                const userRole = await checkAdminRole(session.user.id);
+                if (userRole) {
+                    window.location.href = 'index.html';
+                }
+            }
+        });
+
+        // Password toggle functionality
+        const passwordInput = document.getElementById('password');
+        const passwordToggle = document.getElementById('passwordToggle');
+        const passwordToggleIcon = document.getElementById('passwordToggleIcon');
+
+        if (passwordToggle && passwordInput) {
+            passwordToggle.addEventListener('click', () => {
+                const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                passwordInput.setAttribute('type', type);
+                
+                // Toggle icon
+                if (type === 'text') {
+                    passwordToggleIcon.classList.remove('fa-eye');
+                    passwordToggleIcon.classList.add('fa-eye-slash');
+                    passwordToggle.setAttribute('aria-label', 'Hide password');
+                } else {
+                    passwordToggleIcon.classList.remove('fa-eye-slash');
+                    passwordToggleIcon.classList.add('fa-eye');
+                    passwordToggle.setAttribute('aria-label', 'Show password');
+                }
+            });
+        }
+
+        // Login form handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMessage');
+
+            errorMsg.textContent = '';
+            errorMsg.style.display = 'none';
+
+            try {
+                const { data, error } = await supabase.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+
+                if (error) throw error;
+
+                // Check if user is admin
+                const isAdmin = await checkAdminRole(data.user.id);
+                if (!isAdmin) {
+                    await supabase.auth.signOut();
+                    throw new Error('Access denied. Admin privileges required.');
+                }
+
+                // Store session
+                localStorage.setItem('admin_session', 'active');
+                window.location.href = 'index.html';
+            } catch (error) {
+                errorMsg.textContent = error.message || 'Login failed. Please try again.';
+                errorMsg.style.display = 'block';
+            }
+        });
+
+        async function checkAdminRole(userId) {
+            try {
+                console.log('🔍 Checking admin role for user ID:', userId);
+                
+                // Try a simpler query first to see if we can access the table at all
+                const { data: testData, error: testError } = await supabase
+                    .from('users')
+                    .select('id')
+                    .limit(1);
+                
+                if (testError) {
+                    console.error('❌ Cannot access users table:', testError);
+                    console.error('Error code:', testError.code);
+                    console.error('Error message:', testError.message);
+                    console.error('Error details:', testError.details);
+                    
+                    // Check for infinite recursion error (42P17)
+                    if (testError.code === '42P17' || testError.message?.includes('infinite recursion')) {
+                        console.error('🔴 RLS INFINITE RECURSION ERROR DETECTED!');
+                        console.error('═══════════════════════════════════════════════════════════');
+                        console.error('Your RLS policy on the "users" table is causing infinite recursion.');
+                        console.error('This happens when a policy checks the "users" table, which triggers');
+                        console.error('the same policy again, creating an infinite loop.');
+                        console.error('');
+                        console.error('SOLUTION:');
+                        console.error('1. Go to your Supabase Dashboard → SQL Editor');
+                        console.error('2. Run the SQL from fix_rls_policy.sql file');
+                        console.error('   OR copy this quick fix:');
+                        console.error('');
+                        console.error('   DROP POLICY IF EXISTS "Allow admins to read users" ON users;');
+                        console.error('   CREATE POLICY "Allow authenticated users to read users"');
+                        console.error('   ON users FOR SELECT TO authenticated USING (true);');
+                        console.error('');
+                        console.error('3. Refresh this page and try again');
+                        console.error('═══════════════════════════════════════════════════════════');
+                        return false;
+                    }
+                    
+                    // If it's a 500 error, it's likely a database/server issue
+                    if (testError.code === '500' || testError.message?.includes('500')) {
+                        console.error('🔴 Server Error (500): This is a database server error, not just permissions.');
+                        console.error('Possible causes:');
+                        console.error('1. Database column might not exist');
+                        console.error('2. Database constraint or trigger error');
+                        console.error('3. Database connection issue');
+                        console.error('4. RLS policy causing server error');
+                    }
+                    return false;
+                }
+                
+                // Now try the actual query with better error handling
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('is_super_admin, auth_user_id, role, email, id')
+                    .eq('auth_user_id', userId)
+                    .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no match
+
+                if (error) {
+                    console.error('❌ Error querying users table:', error);
+                    console.error('Error code:', error.code);
+                    console.error('Error message:', error.message);
+                    console.error('Error details:', error.details);
+                    console.error('Error hint:', error.hint);
+                    console.log('User ID being checked:', userId);
+                    
+                    // Try alternative: check by role field instead
+                    console.log('🔄 Trying alternative query by role...');
+                    const { data: altData, error: altError } = await supabase
+                        .from('users')
+                        .select('role, auth_user_id, email, id')
+                        .eq('auth_user_id', userId)
+                        .maybeSingle();
+                    
+                    if (!altError && altData) {
+                        console.log('✅ Found user with alternative query:', altData);
+                        // Check if role is admin
+                        const role = (altData.role || '').toLowerCase();
+                        return role === 'admin' || role === 'super_admin';
+                    }
+                    
+                    return false;
+                }
+
+                if (!data) {
+                    console.warn('⚠️ No user found with auth_user_id:', userId);
+                    console.log('This user might not exist in the users table yet.');
+                    return false;
+                }
+
+                console.log('✅ User found:', data);
+                console.log('📊 User data:', {
+                    id: data.id,
+                    auth_user_id: data.auth_user_id,
+                    email: data.email,
+                    is_super_admin: data.is_super_admin,
+                    role: data.role,
+                    is_super_admin_type: typeof data.is_super_admin
+                });
+                
+                // Check multiple ways: is_super_admin field OR role field
+                const isSuperAdmin = data?.is_super_admin === true || 
+                                    data?.is_super_admin === 'true' || 
+                                    data?.is_super_admin === 1 ||
+                                    String(data?.is_super_admin).toLowerCase() === 'true';
+                
+                const roleIsAdmin = (data?.role || '').toLowerCase() === 'admin' ||
+                                   (data?.role || '').toLowerCase() === 'super_admin';
+                
+                const isAdmin = isSuperAdmin || roleIsAdmin;
+                
+                console.log('🔐 Admin check result:', {
+                    is_super_admin_value: data.is_super_admin,
+                    is_super_admin_check: isSuperAdmin,
+                    role_value: data.role,
+                    role_check: roleIsAdmin,
+                    final_result: isAdmin
+                });
+                
+                return isAdmin;
+            } catch (error) {
+                console.error('❌ Exception in checkAdminRole:', error);
+                console.error('Error stack:', error.stack);
+                return false;
+            }
+        }
+    </script>
+</body>
+</html>
+
