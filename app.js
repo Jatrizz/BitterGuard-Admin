@@ -53,6 +53,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Test Supabase connection
     try {
+        // Check if Supabase client is available
+        if (!supabase) {
+            console.error('❌ Supabase client not initialized');
+            console.error('Make sure supabase.js is loaded before app.js');
+            return;
+        }
+
         const { data: testData, error: testError } = await supabase
             .from('history')
             .select('id')
@@ -60,16 +67,80 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         if (testError) {
             console.error('❌ Supabase connection test failed:', testError);
-            console.error('This might be an RLS (Row Level Security) issue.');
             console.error('Error code:', testError.code);
             console.error('Error message:', testError.message);
             console.error('Error hint:', testError.hint);
-            alert('⚠️ Connection Issue\n\nWe couldn\'t connect to the database. This might be a temporary issue or a security policy problem.\n\nPlease:\n1. Check your internet connection\n2. Refresh the page\n3. If the problem persists, contact your administrator\n\nTechnical details are available in the browser console (Press F12).');
+            
+            // Check if it's a CORS/network error
+            const isCorsError = testError.message?.includes('CORS') || 
+                              testError.message?.includes('Failed to fetch') ||
+                              testError.message?.includes('NetworkError') ||
+                              (testError.code === 'PGRST301' && testError.message?.includes('origin'));
+            
+            // Check if we're on localhost (local development)
+            const isLocalhost = window.location.hostname === 'localhost' || 
+                               window.location.hostname === '127.0.0.1' ||
+                               window.location.hostname === '0.0.0.0';
+            
+            if (isCorsError) {
+                console.error('🔴 CORS ERROR DETECTED!');
+                console.error('═══════════════════════════════════════════════════════════');
+                const currentOrigin = window.location.origin;
+                
+                if (isLocalhost) {
+                    // For localhost, just log to console - don't show alert
+                    console.error('Local development detected. CORS errors are common in local development.');
+                    console.error('If you need to test CORS, add your localhost URL to Supabase:');
+                    console.error(`   ${currentOrigin}`);
+                    console.error('Otherwise, this error can be ignored during local development.');
+                    console.error('═══════════════════════════════════════════════════════════');
+                } else {
+                    // For production (GitHub Pages), show helpful instructions
+                    console.error('Your GitHub Pages domain needs to be added to Supabase CORS settings.');
+                    console.error('');
+                    console.error('SOLUTION:');
+                    console.error('1. Go to your Supabase Dashboard → Settings → API');
+                    console.error('2. Under "Additional Allowed Origins", add your GitHub Pages URL:');
+                    console.error(`   - ${currentOrigin}`);
+                    console.error('   - Or your custom domain if you have one');
+                    console.error('3. Click "Save"');
+                    console.error('4. Wait a few minutes for changes to propagate');
+                    console.error('5. Refresh this page');
+                    console.error('═══════════════════════════════════════════════════════════');
+                    
+                    // Only show alert for production domains
+                    alert(`⚠️ CORS Configuration Required\n\nYour website (${currentOrigin}) needs to be allowed in Supabase settings.\n\nTo fix this:\n1. Go to Supabase Dashboard → Settings → API\n2. Add "${currentOrigin}" to "Additional Allowed Origins"\n3. Save and wait a few minutes\n4. Refresh this page\n\nTechnical details are in the browser console (Press F12).`);
+                }
+            } else {
+                // For other errors (RLS, etc.), just log - don't show alert
+                console.error('This might be an RLS (Row Level Security) issue or another database configuration problem.');
+                console.error('The page will continue to load, but some features may not work until this is resolved.');
+            }
         } else {
             console.log('✅ Supabase connection test successful');
         }
     } catch (err) {
         console.error('❌ Exception during Supabase connection test:', err);
+        
+        // Check if it's a network/CORS error in the catch block
+        const isLocalhost = window.location.hostname === 'localhost' || 
+                           window.location.hostname === '127.0.0.1' ||
+                           window.location.hostname === '0.0.0.0';
+        
+        if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError') || err.name === 'TypeError') {
+            const currentOrigin = window.location.origin;
+            console.error('🔴 Network/CORS Error Detected!');
+            
+            if (isLocalhost) {
+                // For localhost, just log - don't show alert
+                console.error('Local development detected. This CORS error can usually be ignored.');
+                console.error(`If needed, add "${currentOrigin}" to Supabase CORS settings.`);
+            } else {
+                // For production, show alert
+                console.error('Add your domain to Supabase CORS settings:', currentOrigin);
+                alert(`⚠️ Network Connection Issue\n\nCould not connect to the database. This is likely a CORS configuration issue.\n\nTo fix:\n1. Go to Supabase Dashboard → Settings → API\n2. Add "${currentOrigin}" to "Additional Allowed Origins"\n3. Save and refresh this page\n\nCheck the console (F12) for more details.`);
+            }
+        }
     }
     
     // Reset filters to ensure no restrictions on initial load
